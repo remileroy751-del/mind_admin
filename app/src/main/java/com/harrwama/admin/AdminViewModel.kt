@@ -5,6 +5,7 @@ import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
@@ -36,6 +37,21 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     private var servicesChanges by mutableIntStateOf(0)
     private var productsChanges by mutableIntStateOf(0)
 
+    // --- Commandes ---
+    val orders = mutableStateListOf<OrderItem>()
+    private val statusMap = mutableStateMapOf<String, Int>().also { m ->
+        try {
+            val o = JSONObject(prefs.getString("order_status", "{}") ?: "{}")
+            for (k in o.keys()) m[k] = o.optInt(k, ST_NEW)
+        } catch (e: Exception) {
+            // préférences illisibles : on repart de zéro
+        }
+    }
+    var ordersBusy by mutableStateOf(false)
+        private set
+    var ordersError by mutableStateOf<String?>(null)
+        private set
+
     // --- État de l'écran ---
     var loaded by mutableStateOf(false)
         private set
@@ -55,6 +71,9 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     val homeChanged: Boolean get() = home != homeSaved
     val pendingCount: Int
         get() = (if (homeChanged) 1 else 0) + servicesChanges + productsChanges
+
+    fun statusOf(id: String): Int = statusMap[id] ?: ST_NEW
+    fun countOf(status: Int): Int = orders.count { statusOf(it.id) == status }
 
     init {
         if (siteUrl.isNotBlank() && token.isNotBlank()) refresh() else showSettings = true
@@ -100,10 +119,76 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
                 deletedFiles.clear()
                 loaded = true
                 showSettings = false
+                status = "Chargement des commandes…"
+                loadOrders(silent = false)
+                OrderScheduler.schedule(getApplication<Application>())
             } catch (e: Exception) {
                 loaded = false
                 showSettings = true
                 error = friendly(e)
+            } finally {
+                busy = false
+                status = ""
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ commandes
+
+    fun refreshOrders(silent: Boolean = false) {
+        if (ordersBusy || busy || !loaded) return
+        viewModelScope.launch { loadOrders(silent) }
+    }
+
+    private suspend fun loadOrders(silent: Boolean) {
+        ordersBusy = true
+        if (!silent) ordersError = null
+        try {
+            val list = withContext(Dispatchers.IO) { NetlifyClient(token, siteUrl).listOrders() }
+            val sorted = list.sortedByDescending { it.createdAt }
+            val seen = HashSet<String>(prefs.getStringSet("seen_orders", emptySet()) ?: emptySet())
+            val initDone = prefs.getBoolean("seen_init", false)
+            val fresh = if (initDone) sorted.filter { !seen.contains(it.id) } else emptyList()
+            orders.clear()
+            orders.addAll(sorted)
+            for (o in sorted) seen.add(o.id)
+            prefs.edit().putStringSet("seen_orders", seen).putBoolean("seen_init", true).apply()
+            ordersError = null
+            if (fresh.size == 1) {
+                message = "🔔 Nouvelle commande de " + fresh[0].prenom
+            } else if (fresh.size > 1) {
+                message = "🔔 " + fresh.size + " nouvelles commandes"
+            }
+        } catch (e: Exception) {
+            if (!silent) ordersError = friendly(e)
+        } finally {
+            ordersBusy = false
+        }
+    }
+
+    fun setOrderStatus(id: String, st: Int) {
+        statusMap[id] = st
+        val o = JSONObject()
+        for ((k, v) in statusMap) o.put(k, v)
+        prefs.edit().putString("order_status", o.toString()).apply()
+    }
+
+    fun deleteOrder(id: String) {
+        if (busy) return
+        viewModelScope.launch {
+            busy = true
+            status = "Suppression de la commande…"
+            try {
+                withContext(Dispatchers.IO) { NetlifyClient(token, siteUrl).deleteOrder(id) }
+                val idx = orders.indexOfFirst { it.id == id }
+                if (idx >= 0) orders.removeAt(idx)
+                statusMap.remove(id)
+                val o = JSONObject()
+                for ((k, v) in statusMap) o.put(k, v)
+                prefs.edit().putString("order_status", o.toString()).apply()
+                message = "Commande supprimée."
+            } catch (e: Exception) {
+                message = "Échec de la suppression : " + friendly(e)
             } finally {
                 busy = false
                 status = ""

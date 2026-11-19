@@ -11,6 +11,9 @@ import android.net.Uri
 import android.util.LruCache
 import androidx.compose.ui.graphics.ImageBitmap
 import java.io.ByteArrayOutputStream
+import java.text.SimpleDateFormat
+import java.util.Locale
+import java.util.TimeZone
 
 const val MAX_PRODUCTS = 10
 
@@ -30,6 +33,42 @@ data class ProductItem(
     val description: String,
     val image: String
 )
+
+const val ORDER_FORM = "commande-livraison"
+const val ST_NEW = 0
+const val ST_PROCESSING = 1
+const val ST_DELIVERED = 2
+
+/** Une commande envoyée par un client depuis le site (formulaire Netlify). */
+data class OrderItem(
+    val id: String,
+    val createdAt: String,      // ISO 8601 (UTC)
+    val produit: String,
+    val produitImage: String,   // chemin relatif sur le site ("" = aucune)
+    val produitPrix: String,
+    val quantite: String,
+    val prenom: String,
+    val pays: String,
+    val whatsapp: String,       // ex: +22890000000
+    val adresse: String,
+    val dateLivraison: String   // yyyy-MM-dd
+)
+
+fun formatCreated(iso: String): String {
+    return try {
+        val parser = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.US)
+        parser.timeZone = TimeZone.getTimeZone("UTC")
+        val d = parser.parse(iso.take(19))
+        if (d == null) iso else SimpleDateFormat("dd/MM/yyyy 'à' HH:mm", Locale.FRANCE).format(d)
+    } catch (e: Exception) {
+        iso
+    }
+}
+
+fun formatDelivery(d: String): String {
+    val parts = d.split("-")
+    return if (parts.size == 3) parts[2] + "/" + parts[1] + "/" + parts[0] else d
+}
 
 object ImageCache {
     private val cache = LruCache<String, ImageBitmap>(80)

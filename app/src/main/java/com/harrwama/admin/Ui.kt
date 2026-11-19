@@ -1,10 +1,15 @@
 package com.harrwama.admin
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +23,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +36,7 @@ import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -78,11 +85,14 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -172,7 +182,7 @@ fun SettingsScreen(vm: AdminViewModel) {
     ) {
         Text("Harrwama Admin", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = Marine)
         Text(
-            "Connectez l'application à votre site Netlify pour modifier l'accueil, les produits et les services.",
+            "Connectez l'application à votre site Netlify pour modifier l'accueil, les produits et les services, et gérer les commandes.",
             color = Slate
         )
 
@@ -240,11 +250,31 @@ fun SettingsScreen(vm: AdminViewModel) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(vm: AdminViewModel) {
-    val titles = listOf("Accueil", "Produits", "Services")
-    var tab by remember { mutableIntStateOf(0) }
+    val newCount = vm.countOf(ST_NEW)
+    val titles = listOf(
+        "Accueil", "Produits", "Services",
+        if (newCount > 0) "Commandes ($newCount)" else "Commandes"
+    )
+    var tab by remember { mutableIntStateOf(if (AppNav.openOrders) 3 else 0) }
     val snackbar = remember { SnackbarHostState() }
     var confirmPublish by remember { mutableStateOf(false) }
     var confirmRefresh by remember { mutableStateOf(false) }
+
+    LaunchedEffect(AppNav.openOrders) {
+        if (AppNav.openOrders) {
+            tab = 3
+            AppNav.openOrders = false
+            vm.refreshOrders(silent = true)
+        }
+    }
+
+    // Vérifie les nouvelles commandes toutes les 30 secondes tant que l'appli est ouverte
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(30_000)
+            vm.refreshOrders(silent = true)
+        }
+    }
 
     LaunchedEffect(vm.message) {
         val m = vm.message
@@ -289,7 +319,7 @@ fun MainScreen(vm: AdminViewModel) {
                             modifier = Modifier.background(if (tab == i) Bordeaux else Marine),
                             selectedContentColor = Color.White,
                             unselectedContentColor = PaleBlue,
-                            text = { Text(t, fontWeight = FontWeight.SemiBold) }
+                            text = { Text(t, fontWeight = FontWeight.SemiBold, fontSize = 13.sp, maxLines = 1) }
                         )
                     }
                 }
@@ -297,7 +327,7 @@ fun MainScreen(vm: AdminViewModel) {
         },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            if (vm.pendingCount > 0) {
+            if (vm.pendingCount > 0 && tab != 3) {
                 Surface(shadowElevation = 8.dp, color = Color.White) {
                     Button(
                         onClick = { confirmPublish = true },
@@ -314,7 +344,8 @@ fun MainScreen(vm: AdminViewModel) {
             when (tab) {
                 0 -> HomeTab(vm)
                 1 -> ProductsTab(vm)
-                else -> ServicesTab(vm)
+                2 -> ServicesTab(vm)
+                else -> OrdersTab(vm)
             }
         }
     }
@@ -519,10 +550,293 @@ fun ServicesTab(vm: AdminViewModel) {
     }
 }
 
+// ============================================================ onglet Commandes
+
+fun openWhatsapp(context: Context, phone: String, message: String): Boolean {
+    val digits = phone.filter { it.isDigit() }
+    if (digits.isEmpty()) return false
+    return try {
+        val uri = Uri.parse("https://wa.me/" + digits + "?text=" + Uri.encode(message))
+        context.startActivity(Intent(Intent.ACTION_VIEW, uri))
+        true
+    } catch (e: Exception) {
+        false
+    }
+}
+
+@Composable
+fun SectionLabel(text: String) {
+    Text(text.uppercase(), fontSize = 11.sp, color = Bordeaux, fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+}
+
+@Composable
+fun OrdersTab(vm: AdminViewModel) {
+    val context = LocalContext.current
+    var sub by remember { mutableIntStateOf(0) }
+    var openId by remember { mutableStateOf<String?>(null) }
+    val labels = listOf("Nouvelles", "En cours", "Livrées")
+    val list = vm.orders.filter { vm.statusOf(it.id) == sub }
+
+    Column(Modifier.fillMaxSize()) {
+        TabRow(
+            selectedTabIndex = sub,
+            containerColor = Color.White,
+            contentColor = Bordeaux
+        ) {
+            labels.forEachIndexed { i, l ->
+                Tab(
+                    selected = sub == i,
+                    onClick = { sub = i },
+                    selectedContentColor = Bordeaux,
+                    unselectedContentColor = Slate,
+                    text = {
+                        Text(
+                            l + " (" + vm.countOf(i) + ")",
+                            fontSize = 13.sp, fontWeight = FontWeight.SemiBold, maxLines = 1
+                        )
+                    }
+                )
+            }
+        }
+
+        LazyColumn(
+            Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        "Gestion des commandes",
+                        fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Marine,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (vm.ordersBusy) {
+                        CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    OutlinedButton(onClick = { vm.refreshOrders(silent = false) }, enabled = !vm.ordersBusy) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Actualiser")
+                    }
+                }
+            }
+            val err = vm.ordersError
+            if (err != null) {
+                item { Text(err, color = Color(0xFFB3261E), fontSize = 13.sp) }
+            }
+            if (list.isEmpty() && err == null) {
+                item {
+                    Text(
+                        when (sub) {
+                            0 -> "Aucune nouvelle commande pour le moment. Vous serez averti dès qu'un client commande sur le site."
+                            1 -> "Aucune commande en cours de traitement."
+                            else -> "Aucune commande livrée."
+                        },
+                        color = Slate
+                    )
+                }
+            }
+            items(list, key = { it.id }) { o ->
+                OrderRow(o) { openId = o.id }
+            }
+            item {
+                Card(colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                    Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("🔔 Alertes de nouvelles commandes", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text(
+                            "L'appli vérifie les commandes toutes les 15 minutes environ, même fermée. " +
+                                "Pour ne rien rater : autorisez les notifications et retirez l'appli de " +
+                                "l'optimisation de batterie de votre téléphone.",
+                            fontSize = 12.sp, color = Slate
+                        )
+                        TextButton(onClick = {
+                            try {
+                                context.startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Réglages indisponibles sur ce téléphone.", Toast.LENGTH_LONG).show()
+                            }
+                        }) { Text("Ouvrir les réglages batterie") }
+                    }
+                }
+            }
+        }
+    }
+
+    val open = openId?.let { id -> vm.orders.firstOrNull { it.id == id } }
+    if (open != null) {
+        OrderDetail(vm, open) { openId = null }
+    }
+}
+
+@Composable
+fun OrderRow(o: OrderItem, onClick: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(o.prenom, fontWeight = FontWeight.Bold, fontSize = 18.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(
+                    o.quantite + " × " + o.produit,
+                    color = Bordeaux, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    "Livraison souhaitée le " + formatDelivery(o.dateLivraison),
+                    color = Slate, fontSize = 12.sp
+                )
+            }
+            Text("›", fontSize = 28.sp, color = Slate)
+        }
+    }
+}
+
+@Composable
+fun OrderDetail(vm: AdminViewModel, o: OrderItem, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val st = vm.statusOf(o.id)
+    var confirmDelete by remember { mutableStateOf(false) }
+    val stLabel = when (st) {
+        ST_NEW -> "Nouvelle commande"
+        ST_PROCESSING -> "En cours de traitement"
+        else -> "Livrée"
+    }
+
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Paper) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().background(Marine).padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onClose) { Text("← Retour", color = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        stLabel, color = PaleBlue, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(end = 8.dp)
+                    )
+                }
+
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Thumb(vm, o.produitImage, 96.dp)
+                            Spacer(Modifier.width(14.dp))
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                SectionLabel("Produit commandé")
+                                Text(o.produit, fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                                if (o.produitPrix.isNotBlank()) Text(o.produitPrix, color = Slate, fontSize = 13.sp)
+                                Text("Quantité : " + o.quantite + " boîte(s)", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+
+                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SectionLabel("Client")
+                            Text(o.prenom, fontWeight = FontWeight.Bold, fontSize = 22.sp)
+                            if (o.pays.isNotBlank()) Text(o.pays, color = Slate)
+                            Spacer(Modifier.height(4.dp))
+                            Button(
+                                onClick = {
+                                    val msg = "Bonjour " + o.prenom + ", ici HARRWAMA MIND. " +
+                                        "Nous avons bien reçu votre commande : " + o.quantite + " boîte(s) de " + o.produit + ". " +
+                                        "Vous souhaitez être livré(e) le " + formatDelivery(o.dateLivraison) + " à : " + o.adresse + ". " +
+                                        "Pouvez-vous confirmer, afin que nous fixions ensemble l'heure du rendez-vous de livraison ? Merci !"
+                                    if (openWhatsapp(context, o.whatsapp, msg)) {
+                                        if (st == ST_NEW) vm.setOrderStatus(o.id, ST_PROCESSING)
+                                    } else {
+                                        Toast.makeText(context, "WhatsApp n'a pas pu s'ouvrir sur ce téléphone.", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366), contentColor = Color.White),
+                                modifier = Modifier.fillMaxWidth().height(54.dp)
+                            ) {
+                                Text("💬  " + o.whatsapp, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Text(
+                                "Touchez le numéro pour ouvrir WhatsApp : la discussion avec le client s'ouvre avec un message " +
+                                    "prêt à envoyer pour confirmer et fixer le rendez-vous de livraison.",
+                                fontSize = 12.sp, color = Slate
+                            )
+                        }
+                    }
+
+                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SectionLabel("Livraison")
+                            Text(
+                                "Date souhaitée : " + formatDelivery(o.dateLivraison),
+                                fontWeight = FontWeight.Bold, fontSize = 16.sp
+                            )
+                            Text(o.adresse)
+                            Text("Paiement à la livraison", color = Bordeaux, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                        }
+                    }
+
+                    Text("Commande reçue le " + formatCreated(o.createdAt), fontSize = 12.sp, color = Slate)
+                }
+
+                Surface(shadowElevation = 8.dp, color = Color.White) {
+                    Column(
+                        Modifier.fillMaxWidth().padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        when (st) {
+                            ST_NEW -> {
+                                Button(
+                                    onClick = { vm.setOrderStatus(o.id, ST_PROCESSING) },
+                                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                                ) { Text("Prendre en charge (passer en cours)") }
+                            }
+                            ST_PROCESSING -> {
+                                Button(
+                                    onClick = { vm.setOrderStatus(o.id, ST_DELIVERED); onClose() },
+                                    modifier = Modifier.fillMaxWidth().height(50.dp)
+                                ) { Text("✓ Marquer comme livrée") }
+                                OutlinedButton(
+                                    onClick = { vm.setOrderStatus(o.id, ST_NEW) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Remettre dans « Nouvelles »") }
+                            }
+                            else -> {
+                                OutlinedButton(
+                                    onClick = { vm.setOrderStatus(o.id, ST_PROCESSING) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Remettre « En cours »") }
+                                TextButton(
+                                    onClick = { confirmDelete = true },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) { Text("Supprimer cette commande", color = Color(0xFFB3261E)) }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        ConfirmDialog(
+            title = "Supprimer cette commande ?",
+            text = "La commande de " + o.prenom + " sera définitivement supprimée de Netlify.",
+            confirmLabel = "Supprimer",
+            onConfirm = { confirmDelete = false; onClose(); vm.deleteOrder(o.id) },
+            onDismiss = { confirmDelete = false }
+        )
+    }
+}
+
 // ============================================================ composants communs
 
 @Composable
-fun Thumb(vm: AdminViewModel, path: String) {
+fun Thumb(vm: AdminViewModel, path: String, size: Dp = 76.dp) {
     val state by produceState<Pair<Boolean, ImageBitmap?>>(Pair(false, null), path) {
         value = Pair(true, withContext(Dispatchers.IO) { vm.loadThumb(path) })
     }
@@ -530,7 +844,7 @@ fun Thumb(vm: AdminViewModel, path: String) {
     val bmp = state.second
     Box(
         Modifier
-            .size(76.dp)
+            .size(size)
             .clip(RoundedCornerShape(10.dp))
             .background(Color(0xFFE6EAF0)),
         contentAlignment = Alignment.Center

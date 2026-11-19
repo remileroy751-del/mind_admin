@@ -63,6 +63,9 @@ class NetlifyClient(private val token: String, siteUrl: String) {
             return s.lowercase()
         }
 
+        private val siteIdCache = HashMap<String, String>()
+        private val formIdCache = HashMap<String, String>()
+
         fun sha1(bytes: ByteArray): String {
             val digest = MessageDigest.getInstance("SHA-1").digest(bytes)
             val sb = StringBuilder()
@@ -113,6 +116,82 @@ class NetlifyClient(private val token: String, siteUrl: String) {
         val published = o.optJSONObject("published_deploy")
         val pid = if (published != null) published.optString("id") else ""
         return SiteInfo(o.getString("id"), if (pid.isEmpty()) null else pid)
+    }
+
+    // ------------------------------------------------------------------ commandes
+
+    private fun siteId(): String {
+        val cached = siteIdCache[host]
+        if (cached != null) return cached
+        val id = connect().id
+        siteIdCache[host] = id
+        return id
+    }
+
+    private fun orderFormId(): String? {
+        val cached = formIdCache[host]
+        if (cached != null) return cached
+        val fr = Http.call("GET", "$api/sites/${siteId()}/forms", token)
+        if (fr.code == 404) {
+            siteIdCache.remove(host)
+            throw ApiException("Site introuvable (404).")
+        }
+        if (fr.code !in 200..299) throw ApiException("Lecture des formulaires impossible (code ${fr.code}).")
+        val forms = JSONArray(fr.text)
+        for (i in 0 until forms.length()) {
+            val f = forms.getJSONObject(i)
+            if (f.optString("name") == ORDER_FORM) {
+                val id = f.getString("id")
+                formIdCache[host] = id
+                return id
+            }
+        }
+        return null // aucune commande reçue pour l'instant
+    }
+
+    /** Liste les commandes reçues via le formulaire du site (les plus récentes d'abord). */
+    fun listOrders(): List<OrderItem> {
+        val formId = orderFormId() ?: return emptyList()
+        val out = ArrayList<OrderItem>()
+        var page = 1
+        while (page <= 5) {
+            val r = Http.call("GET", "$api/forms/$formId/submissions?per_page=100&page=$page", token)
+            if (r.code == 401) throw ApiException("Clé secrète refusée par Netlify (401).")
+            if (r.code !in 200..299) throw ApiException("Lecture des commandes impossible (code ${r.code}).")
+            val arr = JSONArray(r.text)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val d = o.optJSONObject("data") ?: continue
+                val prenom = d.optString("prenom")
+                val whatsapp = d.optString("whatsapp_complet")
+                if (prenom.isEmpty() && whatsapp.isEmpty()) continue
+                out.add(
+                    OrderItem(
+                        id = o.getString("id"),
+                        createdAt = o.optString("created_at"),
+                        produit = d.optString("produit"),
+                        produitImage = d.optString("produit_image"),
+                        produitPrix = d.optString("produit_prix"),
+                        quantite = d.optString("quantite"),
+                        prenom = prenom,
+                        pays = d.optString("pays"),
+                        whatsapp = whatsapp,
+                        adresse = d.optString("adresse"),
+                        dateLivraison = d.optString("date_livraison")
+                    )
+                )
+            }
+            if (arr.length() < 100) break
+            page++
+        }
+        return out
+    }
+
+    fun deleteOrder(id: String) {
+        val r = Http.call("DELETE", "$api/submissions/$id", token)
+        if (r.code !in 200..299 && r.code != 404) {
+            throw ApiException("Suppression impossible (code ${r.code}).")
+        }
     }
 
     /** Télécharge un fichier texte du site en ligne (null si 404). */

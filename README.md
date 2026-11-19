@@ -4,6 +4,11 @@ Modifie le site Harrwama Mind (hébergé sur Netlify) depuis le téléphone :
 - onglet **Accueil** : grand titre + texte sous le titre
 - onglet **Produits** : ajouter / supprimer (image + nom + petite description, 10 max)
 - onglet **Services** : ajouter / supprimer (image + titre + petite description)
+- onglet **Commandes** : commandes reçues depuis le site, classées *Nouvelles / En cours / Livrées*.
+  Touchez une commande pour voir tout (miniature du produit, quantité, client, adresse, date de livraison) ;
+  touchez le numéro du client pour ouvrir WhatsApp avec un message de confirmation prêt à envoyer.
+  Une notification prévient à chaque nouvelle commande (vérification toutes les ~15 min appli fermée,
+  toutes les 30 s appli ouverte). Autorisez les notifications et désactivez l'optimisation de batterie.
 
 ## Compiler (automatique)
 1. Créez un dépôt GitHub (privé conseillé) et envoyez-y **le contenu de ce dossier**
