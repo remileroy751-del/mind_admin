@@ -32,10 +32,22 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     var home by mutableStateOf(HomeContent("", ""))
         private set
     private var homeSaved by mutableStateOf(HomeContent("", ""))
+    var phone by mutableStateOf(DEFAULT_PHONE)
+        private set
+    private var phoneSaved by mutableStateOf(DEFAULT_PHONE)
     val services = mutableStateListOf<ServiceItem>()
     val products = mutableStateListOf<ProductItem>()
     private var servicesChanges by mutableIntStateOf(0)
     private var productsChanges by mutableIntStateOf(0)
+
+    // --- Messagerie ---
+    val messages = mutableStateListOf<MessageItem>()
+    private val readMap = mutableStateMapOf<String, Boolean>().also { m ->
+        val saved = prefs.getStringSet("read_messages", emptySet()) ?: emptySet<String>()
+        for (id in saved) m[id] = true
+    }
+    var messagesError by mutableStateOf<String?>(null)
+        private set
 
     // --- Commandes ---
     val orders = mutableStateListOf<OrderItem>()
@@ -69,8 +81,9 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     private val deletedFiles = LinkedHashSet<String>()
 
     val homeChanged: Boolean get() = home != homeSaved
+    val phoneChanged: Boolean get() = phone != phoneSaved
     val pendingCount: Int
-        get() = (if (homeChanged) 1 else 0) + servicesChanges + productsChanges
+        get() = (if (homeChanged) 1 else 0) + (if (phoneChanged) 1 else 0) + servicesChanges + productsChanges
 
     fun statusOf(id: String): Int = statusMap[id] ?: ST_NEW
     fun countOf(status: Int): Int = orders.count { statusOf(it.id) == status }
@@ -111,6 +124,16 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 home = loadedData.first
                 homeSaved = loadedData.first
+                val contactTxt = withContext(Dispatchers.IO) {
+                    try { client.fetchPublic("contact.json") } catch (e: Exception) { null }
+                }
+                val tel = try {
+                    if (contactTxt == null) "" else JSONObject(contactTxt).optString("telephone")
+                } catch (e: Exception) {
+                    ""
+                }
+                phone = if (tel.isNotBlank()) tel else DEFAULT_PHONE
+                phoneSaved = phone
                 services.clear(); services.addAll(loadedData.second)
                 products.clear(); products.addAll(loadedData.third)
                 servicesChanges = 0
@@ -119,7 +142,7 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
                 deletedFiles.clear()
                 loaded = true
                 showSettings = false
-                status = "Chargement des commandes…"
+                status = "Chargement des commandes et messages…"
                 loadOrders(silent = false)
                 OrderScheduler.schedule(getApplication<Application>())
             } catch (e: Exception) {
@@ -138,6 +161,76 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
     fun refreshOrders(silent: Boolean = false) {
         if (ordersBusy || busy || !loaded) return
         viewModelScope.launch { loadOrders(silent) }
+    }
+
+    fun isRead(id: String): Boolean = readMap[id] == true
+    fun unreadCount(): Int = messages.count { readMap[it.id] != true }
+
+    private fun persistRead() {
+        val keep = HashSet<String>()
+        for ((k, v) in readMap) if (v) keep.add(k)
+        prefs.edit().putStringSet("read_messages", keep).apply()
+    }
+
+    fun markRead(id: String) {
+        if (readMap[id] != true) {
+            readMap[id] = true
+            persistRead()
+        }
+    }
+
+    fun markUnread(id: String) {
+        readMap[id] = false
+        persistRead()
+    }
+
+    private suspend fun loadMessages(silent: Boolean) {
+        try {
+            val list = withContext(Dispatchers.IO) { NetlifyClient(token, siteUrl).listMessages() }
+            val sorted = list.sortedByDescending { it.createdAt }
+            val seen = HashSet<String>(prefs.getStringSet("seen_messages", emptySet()) ?: emptySet())
+            val initDone = prefs.getBoolean("seen_msg_init", false)
+            val fresh = if (initDone) sorted.filter { !seen.contains(it.id) } else emptyList()
+            messages.clear()
+            messages.addAll(sorted)
+            for (m in sorted) seen.add(m.id)
+            prefs.edit().putStringSet("seen_messages", seen).putBoolean("seen_msg_init", true).apply()
+            messagesError = null
+            if (fresh.size == 1) {
+                message = "✉ Nouveau message de " + fresh[0].nom
+            } else if (fresh.size > 1) {
+                message = "✉ " + fresh.size + " nouveaux messages"
+            }
+        } catch (e: Exception) {
+            if (!silent) messagesError = friendly(e)
+        }
+    }
+
+    fun deleteMessage(id: String) {
+        if (busy) return
+        viewModelScope.launch {
+            busy = true
+            status = "Suppression du message…"
+            try {
+                withContext(Dispatchers.IO) { NetlifyClient(token, siteUrl).deleteOrder(id) }
+                val idx = messages.indexOfFirst { it.id == id }
+                if (idx >= 0) messages.removeAt(idx)
+                readMap.remove(id)
+                persistRead()
+                message = "Message supprimé."
+            } catch (e: Exception) {
+                message = "Échec de la suppression : " + friendly(e)
+            } finally {
+                busy = false
+                status = ""
+            }
+        }
+    }
+
+    /** Valide le nouveau numéro principal du site et publie immédiatement. */
+    fun savePhone(tel: String) {
+        phone = tel.trim()
+        publish()
     }
 
     private suspend fun loadOrders(silent: Boolean) {
@@ -161,6 +254,12 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
             }
         } catch (e: Exception) {
             if (!silent) ordersError = friendly(e)
+        } finally {
+            ordersBusy = false
+        }
+        ordersBusy = true
+        try {
+            loadMessages(silent)
         } finally {
             ordersBusy = false
         }
@@ -326,7 +425,9 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
                 val doHome = homeChanged
                 val doServices = servicesChanges > 0
                 val doProducts = productsChanges > 0
+                val doPhone = phoneChanged
                 if (doHome) changes.add(FileChange("home.json", homeJson().toByteArray(Charsets.UTF_8)))
+                if (doPhone) changes.add(FileChange("contact.json", contactJson().toByteArray(Charsets.UTF_8)))
                 if (doServices) changes.add(FileChange("services.json", servicesJson().toByteArray(Charsets.UTF_8)))
                 if (doProducts) changes.add(FileChange("products.json", productsJson().toByteArray(Charsets.UTF_8)))
                 for ((p, b) in pendingFiles) changes.add(FileChange(p, b))
@@ -338,6 +439,7 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
                 }
 
                 homeSaved = home
+                phoneSaved = phone
                 servicesChanges = 0
                 productsChanges = 0
                 pendingFiles.clear()
@@ -382,6 +484,12 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         return out
+    }
+
+    private fun contactJson(): String {
+        val o = JSONObject()
+        o.put("telephone", phone)
+        return o.toString(2)
     }
 
     private fun homeJson(): String {

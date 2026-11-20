@@ -16,6 +16,7 @@ import androidx.core.content.ContextCompat
 /** Demande d'ouverture directe de l'onglet Commandes (clic sur une notification). */
 object AppNav {
     var openOrders by mutableStateOf(false)
+    var openMessages by mutableStateOf(false)
 }
 
 class MainActivity : ComponentActivity() {
@@ -49,6 +50,9 @@ class MainActivity : ComponentActivity() {
     private fun handleIntent(i: Intent?) {
         if (i != null && i.getBooleanExtra(Notifier.EXTRA_OPEN_ORDERS, false)) {
             AppNav.openOrders = true
+        }
+        if (i != null && i.getBooleanExtra(Notifier.EXTRA_OPEN_MESSAGES, false)) {
+            AppNav.openMessages = true
         }
     }
 }

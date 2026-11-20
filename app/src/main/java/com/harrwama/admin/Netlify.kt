@@ -128,8 +128,9 @@ class NetlifyClient(private val token: String, siteUrl: String) {
         return id
     }
 
-    private fun orderFormId(): String? {
-        val cached = formIdCache[host]
+    private fun formIdFor(formName: String): String? {
+        val cacheKey = host + "|" + formName
+        val cached = formIdCache[cacheKey]
         if (cached != null) return cached
         val fr = Http.call("GET", "$api/sites/${siteId()}/forms", token)
         if (fr.code == 404) {
@@ -140,9 +141,9 @@ class NetlifyClient(private val token: String, siteUrl: String) {
         val forms = JSONArray(fr.text)
         for (i in 0 until forms.length()) {
             val f = forms.getJSONObject(i)
-            if (f.optString("name") == ORDER_FORM) {
+            if (f.optString("name") == formName) {
                 val id = f.getString("id")
-                formIdCache[host] = id
+                formIdCache[cacheKey] = id
                 return id
             }
         }
@@ -151,7 +152,7 @@ class NetlifyClient(private val token: String, siteUrl: String) {
 
     /** Liste les commandes reçues via le formulaire du site (les plus récentes d'abord). */
     fun listOrders(): List<OrderItem> {
-        val formId = orderFormId() ?: return emptyList()
+        val formId = formIdFor(ORDER_FORM) ?: return emptyList()
         val out = ArrayList<OrderItem>()
         var page = 1
         while (page <= 5) {
@@ -178,6 +179,39 @@ class NetlifyClient(private val token: String, siteUrl: String) {
                         whatsapp = whatsapp,
                         adresse = d.optString("adresse"),
                         dateLivraison = d.optString("date_livraison")
+                    )
+                )
+            }
+            if (arr.length() < 100) break
+            page++
+        }
+        return out
+    }
+
+    /** Liste les messages reçus via « Nous écrire » (les plus récents d'abord). */
+    fun listMessages(): List<MessageItem> {
+        val formId = formIdFor(MESSAGE_FORM) ?: return emptyList()
+        val out = ArrayList<MessageItem>()
+        var page = 1
+        while (page <= 5) {
+            val r = Http.call("GET", "$api/forms/$formId/submissions?per_page=100&page=$page", token)
+            if (r.code == 401) throw ApiException("Clé secrète refusée par Netlify (401).")
+            if (r.code !in 200..299) throw ApiException("Lecture des messages impossible (code ${r.code}).")
+            val arr = JSONArray(r.text)
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val d = o.optJSONObject("data") ?: continue
+                val nom = d.optString("nom_complet")
+                val msg = d.optString("message")
+                if (nom.isEmpty() && msg.isEmpty()) continue
+                out.add(
+                    MessageItem(
+                        id = o.getString("id"),
+                        createdAt = o.optString("created_at"),
+                        nom = nom,
+                        pays = d.optString("pays"),
+                        whatsapp = d.optString("whatsapp_complet"),
+                        message = msg
                     )
                 )
             }

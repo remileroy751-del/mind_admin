@@ -51,6 +51,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
@@ -252,11 +253,15 @@ fun SettingsScreen(vm: AdminViewModel) {
 @Composable
 fun MainScreen(vm: AdminViewModel) {
     val newCount = vm.countOf(ST_NEW)
+    val unread = vm.unreadCount()
     val titles = listOf(
         "Accueil", "Produits", "Services",
-        if (newCount > 0) "Commandes ($newCount)" else "Commandes"
+        if (newCount > 0) "Commandes ($newCount)" else "Commandes",
+        if (unread > 0) "Messagerie ($unread)" else "Messagerie"
     )
-    var tab by remember { mutableIntStateOf(if (AppNav.openOrders) 3 else 0) }
+    var tab by remember {
+        mutableIntStateOf(if (AppNav.openMessages) 4 else if (AppNav.openOrders) 3 else 0)
+    }
     val snackbar = remember { SnackbarHostState() }
     var confirmPublish by remember { mutableStateOf(false) }
     var confirmRefresh by remember { mutableStateOf(false) }
@@ -269,7 +274,15 @@ fun MainScreen(vm: AdminViewModel) {
         }
     }
 
-    // Vérifie les nouvelles commandes toutes les 30 secondes tant que l'appli est ouverte
+    LaunchedEffect(AppNav.openMessages) {
+        if (AppNav.openMessages) {
+            tab = 4
+            AppNav.openMessages = false
+            vm.refreshOrders(silent = true)
+        }
+    }
+
+    // Vérifie les nouvelles commandes et messages toutes les 30 secondes tant que l'appli est ouverte
     LaunchedEffect(Unit) {
         while (true) {
             delay(30_000)
@@ -307,11 +320,13 @@ fun MainScreen(vm: AdminViewModel) {
                         }
                     }
                 )
-                TabRow(
+                ScrollableTabRow(
                     selectedTabIndex = tab,
                     containerColor = Marine,
                     contentColor = Color.White,
-                    indicator = {}
+                    edgePadding = 0.dp,
+                    indicator = {},
+                    divider = {}
                 ) {
                     titles.forEachIndexed { i, t ->
                         Tab(
@@ -328,7 +343,7 @@ fun MainScreen(vm: AdminViewModel) {
         },
         snackbarHost = { SnackbarHost(snackbar) },
         bottomBar = {
-            if (vm.pendingCount > 0 && tab != 3) {
+            if (vm.pendingCount > 0 && tab < 3) {
                 Surface(shadowElevation = 8.dp, color = Color.White) {
                     Button(
                         onClick = { confirmPublish = true },
@@ -346,7 +361,8 @@ fun MainScreen(vm: AdminViewModel) {
                 0 -> HomeTab(vm)
                 1 -> ProductsTab(vm)
                 2 -> ServicesTab(vm)
-                else -> OrdersTab(vm)
+                3 -> OrdersTab(vm)
+                else -> MessagesTab(vm)
             }
         }
     }
@@ -389,6 +405,7 @@ fun styledTitle(s: String): AnnotatedString = buildAnnotatedString {
 @Composable
 fun HomeTab(vm: AdminViewModel) {
     var editing by remember { mutableStateOf(false) }
+    var editingPhone by remember { mutableStateOf(false) }
 
     Column(
         Modifier
@@ -428,6 +445,35 @@ fun HomeTab(vm: AdminViewModel) {
             Spacer(Modifier.width(8.dp))
             Text("Modifier le titre et le texte")
         }
+
+        Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SectionLabel("Téléphone principal du site")
+                Text(vm.phone, fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Marine)
+                Text(
+                    "Ce numéro sert au bouton WhatsApp, au lien « Écrire sur WhatsApp » du bas de page " +
+                        "et aux boutons « Contacter pour ce service ». Il reste cliquable sur le site.",
+                    fontSize = 12.sp, color = Slate
+                )
+                Spacer(Modifier.height(4.dp))
+                OutlinedButton(onClick = { editingPhone = true }, modifier = Modifier.fillMaxWidth().height(48.dp)) {
+                    Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(8.dp))
+                    Text("Modifier le numéro de téléphone")
+                }
+            }
+        }
+    }
+
+    if (editingPhone) {
+        EditPhoneScreen(
+            initPhone = vm.phone,
+            onDismiss = { editingPhone = false },
+            onSave = { t ->
+                editingPhone = false
+                vm.savePhone(t)
+            }
+        )
     }
 
     if (editing) {
@@ -681,6 +727,249 @@ fun ServicesTab(vm: AdminViewModel) {
             confirmLabel = "Supprimer",
             onConfirm = { vm.deleteService(deleteIndex); deleteIndex = -1 },
             onDismiss = { deleteIndex = -1 }
+        )
+    }
+}
+
+fun isValidPhone(t: String): Boolean {
+    val v = t.trim()
+    if (!v.startsWith("+")) return false
+    if (v.count { it == '+' } != 1) return false
+    if (!v.all { it.isDigit() || it == ' ' || it == '+' }) return false
+    val digits = v.count { it.isDigit() }
+    return digits in 8..15
+}
+
+@Composable
+fun EditPhoneScreen(initPhone: String, onDismiss: () -> Unit, onSave: (String) -> Unit) {
+    var tel by remember { mutableStateOf(initPhone) }
+    var err by remember { mutableStateOf<String?>(null) }
+    val digits = tel.filter { it.isDigit() }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Paper) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().background(Marine).padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("← Annuler", color = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Téléphone du site", color = PaleBlue, fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 12.dp)
+                    )
+                }
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    OutlinedTextField(
+                        value = tel,
+                        onValueChange = { tel = it.filter { c -> c.isDigit() || c == ' ' || c == '+' }; err = null },
+                        label = { Text("Numéro principal (WhatsApp)") },
+                        supportingText = { Text("Format international : + puis l'indicatif et le numéro. Ex : +226 70 70 70 21") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            SectionLabel("Aperçu sur le site")
+                            Text(if (tel.isBlank()) "—" else tel.trim(), fontWeight = FontWeight.Bold, fontSize = 18.sp)
+                            Text("Lien WhatsApp : wa.me/" + digits, fontSize = 12.sp, color = Slate)
+                        }
+                    }
+                    val e = err
+                    if (e != null) Text(e, color = Color(0xFFB3261E), fontSize = 13.sp)
+                }
+                Surface(shadowElevation = 8.dp, color = Color.White) {
+                    Button(
+                        onClick = {
+                            if (!isValidPhone(tel)) {
+                                err = "Numéro invalide : commencez par + et l'indicatif du pays (8 à 15 chiffres)."
+                            } else if (tel.trim() == initPhone.trim()) {
+                                onDismiss()
+                            } else {
+                                onSave(tel)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(12.dp).height(52.dp)
+                    ) { Text("Valider et mettre à jour le site") }
+                }
+            }
+        }
+    }
+}
+
+// ============================================================ onglet Messagerie
+
+@Composable
+fun MessagesTab(vm: AdminViewModel) {
+    var openId by remember { mutableStateOf<String?>(null) }
+
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(16.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        item {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "Messagerie",
+                    fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Marine,
+                    modifier = Modifier.weight(1f)
+                )
+                if (vm.ordersBusy) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(8.dp))
+                }
+                OutlinedButton(onClick = { vm.refreshOrders(silent = false) }, enabled = !vm.ordersBusy) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Spacer(Modifier.width(6.dp))
+                    Text("Actualiser")
+                }
+            }
+        }
+        item {
+            Text(
+                "Messages envoyés par les visiteurs via le bouton « Nous écrire » du site. " +
+                    "Touchez un nom pour lire le message.",
+                color = Slate, fontSize = 13.sp
+            )
+        }
+        val err = vm.messagesError
+        if (err != null) {
+            item { Text(err, color = Color(0xFFB3261E), fontSize = 13.sp) }
+        }
+        if (vm.messages.isEmpty() && err == null) {
+            item { Text("Aucun message pour le moment. Vous serez averti dès qu'un visiteur vous écrit.", color = Slate) }
+        }
+        items(vm.messages, key = { it.id }) { m ->
+            MessageRow(m, unread = !vm.isRead(m.id)) {
+                vm.markRead(m.id)
+                openId = m.id
+            }
+        }
+    }
+
+    val open = openId?.let { id -> vm.messages.firstOrNull { it.id == id } }
+    if (open != null) {
+        MessageDetail(vm, open) { openId = null }
+    }
+}
+
+@Composable
+fun MessageRow(m: MessageItem, unread: Boolean, onClick: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color.White),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+    ) {
+        Row(Modifier.padding(14.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(10.dp)
+                    .clip(RoundedCornerShape(5.dp))
+                    .background(if (unread) Bordeaux else Color.Transparent)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(Modifier.weight(1f)) {
+                Text(
+                    m.nom,
+                    fontWeight = if (unread) FontWeight.Bold else FontWeight.Medium,
+                    fontSize = 17.sp, maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                Text(formatCreated(m.createdAt), color = Slate, fontSize = 12.sp)
+            }
+            Text("›", fontSize = 28.sp, color = Slate)
+        }
+    }
+}
+
+@Composable
+fun MessageDetail(vm: AdminViewModel, m: MessageItem, onClose: () -> Unit) {
+    val context = LocalContext.current
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    Dialog(onDismissRequest = onClose, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Paper) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().background(Marine).padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onClose) { Text("← Retour", color = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Message reçu", color = PaleBlue, fontSize = 13.sp, fontWeight = FontWeight.SemiBold,
+                        modifier = Modifier.padding(end = 12.dp)
+                    )
+                }
+
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                            SectionLabel("Message")
+                            Text(m.message, fontSize = 17.sp, lineHeight = 24.sp)
+                            Text("— " + m.nom, fontWeight = FontWeight.Bold, color = Bordeaux)
+                        }
+                    }
+
+                    Card(colors = CardDefaults.cardColors(containerColor = Color.White), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            SectionLabel("Expéditeur")
+                            Text(m.nom, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+                            if (m.pays.isNotBlank()) Text(m.pays, color = Slate)
+                            Spacer(Modifier.height(4.dp))
+                            Button(
+                                onClick = {
+                                    val msg = "Bonjour " + m.nom + ", ici HARRWAMA MIND. " +
+                                        "Merci pour votre message : « " + m.message + " »."
+                                    if (!openWhatsapp(context, m.whatsapp, msg)) {
+                                        Toast.makeText(context, "WhatsApp n'a pas pu s'ouvrir sur ce téléphone.", Toast.LENGTH_LONG).show()
+                                    }
+                                },
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366), contentColor = Color.White),
+                                modifier = Modifier.fillMaxWidth().height(54.dp)
+                            ) {
+                                Text("💬  " + m.whatsapp, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                            }
+                            Text(
+                                "Touchez le numéro pour ouvrir WhatsApp et répondre directement à ce visiteur.",
+                                fontSize = 12.sp, color = Slate
+                            )
+                        }
+                    }
+
+                    Text("Reçu le " + formatCreated(m.createdAt), fontSize = 12.sp, color = Slate)
+                }
+
+                Surface(shadowElevation = 8.dp, color = Color.White) {
+                    Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { vm.markUnread(m.id); onClose() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) { Text("Marquer comme non lu") }
+                        TextButton(onClick = { confirmDelete = true }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Supprimer ce message", color = Color(0xFFB3261E))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (confirmDelete) {
+        ConfirmDialog(
+            title = "Supprimer ce message ?",
+            text = "Le message de " + m.nom + " sera définitivement supprimé de Netlify.",
+            confirmLabel = "Supprimer",
+            onConfirm = { confirmDelete = false; onClose(); vm.deleteMessage(m.id) },
+            onDismiss = { confirmDelete = false }
         )
     }
 }

@@ -4,6 +4,9 @@ Modifie le site Harrwama Mind (hébergé sur Netlify) depuis le téléphone :
 - onglet **Accueil** : grand titre + texte sous le titre
 - onglet **Produits** : ajouter / supprimer (image + nom + petite description, 10 max)
 - onglet **Services** : ajouter / supprimer (image + titre + petite description)
+- onglet **Messagerie** : messages des visiteurs (bouton « Nous écrire » du site), signés de leur nom complet ;
+  touchez un nom pour lire le message, touchez le numéro pour répondre sur WhatsApp. Notification à chaque nouveau message.
+- onglet **Accueil** : bouton « Modifier le numéro de téléphone » pour changer le numéro principal du site.
 - **Modifier** : sur l'accueil, chaque produit et chaque service, le petit stylo ouvre un écran pour changer
   le texte et la photo ; le bouton **Valider** en bas met le site à jour immédiatement.
 - onglet **Commandes** : commandes reçues depuis le site, classées *Nouvelles / En cours / Livrées*.

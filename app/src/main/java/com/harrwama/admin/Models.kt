@@ -35,6 +35,8 @@ data class ProductItem(
 )
 
 const val ORDER_FORM = "commande-livraison"
+const val MESSAGE_FORM = "message-contact"
+const val DEFAULT_PHONE = "+226 70 70 70 21"
 const val ST_NEW = 0
 const val ST_PROCESSING = 1
 const val ST_DELIVERED = 2
@@ -52,6 +54,16 @@ data class OrderItem(
     val whatsapp: String,       // ex: +22890000000
     val adresse: String,
     val dateLivraison: String   // yyyy-MM-dd
+)
+
+/** Un message envoyé par un visiteur via le bouton « Nous écrire » du site. */
+data class MessageItem(
+    val id: String,
+    val createdAt: String,
+    val nom: String,        // nom complet du visiteur (signature du message)
+    val pays: String,
+    val whatsapp: String,   // ex: +22890000000
+    val message: String
 )
 
 fun formatCreated(iso: String): String {
