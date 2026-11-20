@@ -202,7 +202,28 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
         home = HomeContent(titre ?: home.titre, texte ?: home.texte)
     }
 
+    /** Valide la modification de l'accueil et met le site à jour immédiatement. */
+    fun saveHome(titre: String, texte: String) {
+        home = HomeContent(titre.trim(), texte.trim())
+        publish()
+    }
+
     // ------------------------------------------------------------------ services
+
+    fun editService(index: Int, titre: String, domaine: String, description: String, image: ByteArray?) {
+        if (index !in services.indices) return
+        val old = services[index]
+        var path = old.image
+        if (image != null) {
+            forgetImage(old.image)
+            path = "assets/services/s-${System.currentTimeMillis()}.jpg"
+            pendingFiles[path] = image
+            localImages[path] = image
+        }
+        services[index] = ServiceItem(domaine.trim(), titre.trim(), description.trim(), path)
+        servicesChanges++
+        publish()
+    }
 
     fun addService(titre: String, domaine: String, description: String, image: ByteArray?) {
         var path = ""
@@ -237,6 +258,21 @@ class AdminViewModel(app: Application) : AndroidViewModel(app) {
         }
         products.add(ProductItem(nom.trim(), categorie.trim(), prix.trim(), description.trim(), path))
         productsChanges++
+    }
+
+    fun editProduct(index: Int, nom: String, categorie: String, prix: String, description: String, image: ByteArray?) {
+        if (index !in products.indices) return
+        val old = products[index]
+        var path = old.image
+        if (image != null) {
+            forgetImage(old.image)
+            path = "assets/products/p-${System.currentTimeMillis()}.jpg"
+            pendingFiles[path] = image
+            localImages[path] = image
+        }
+        products[index] = ProductItem(nom.trim(), categorie.trim(), prix.trim(), description.trim(), path)
+        productsChanges++
+        publish()
     }
 
     fun deleteProduct(index: Int) {

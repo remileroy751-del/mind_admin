@@ -32,6 +32,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
@@ -387,6 +388,8 @@ fun styledTitle(s: String): AnnotatedString = buildAnnotatedString {
 
 @Composable
 fun HomeTab(vm: AdminViewModel) {
+    var editing by remember { mutableStateOf(false) }
+
     Column(
         Modifier
             .fillMaxSize()
@@ -394,27 +397,18 @@ fun HomeTab(vm: AdminViewModel) {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text("Page d'accueil", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Marine)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "Page d'accueil",
+                fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Marine,
+                modifier = Modifier.weight(1f)
+            )
+            IconButton(onClick = { editing = true }) {
+                Icon(Icons.Default.Edit, contentDescription = "Modifier", tint = Bordeaux)
+            }
+        }
+        Text("Texte actuellement affiché sur le site :", color = Slate, fontSize = 13.sp)
 
-        OutlinedTextField(
-            value = vm.home.titre,
-            onValueChange = { vm.updateHome(titre = it) },
-            label = { Text("Grand titre") },
-            supportingText = { Text("Entourez des mots avec des étoiles pour les mettre en couleur : *votre santé*") },
-            minLines = 2,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            modifier = Modifier.fillMaxWidth()
-        )
-        OutlinedTextField(
-            value = vm.home.texte,
-            onValueChange = { vm.updateHome(texte = it) },
-            label = { Text("Texte sous le grand titre") },
-            minLines = 5,
-            keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Text("Aperçu", fontWeight = FontWeight.SemiBold, color = Slate)
         Card(colors = CardDefaults.cardColors(containerColor = Marine), modifier = Modifier.fillMaxWidth()) {
             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text(
@@ -428,6 +422,103 @@ fun HomeTab(vm: AdminViewModel) {
                 Text(vm.home.texte, color = PaleBlue, fontSize = 15.sp, lineHeight = 22.sp)
             }
         }
+
+        Button(onClick = { editing = true }, modifier = Modifier.fillMaxWidth().height(50.dp)) {
+            Icon(Icons.Default.Edit, contentDescription = null)
+            Spacer(Modifier.width(8.dp))
+            Text("Modifier le titre et le texte")
+        }
+    }
+
+    if (editing) {
+        EditHomeScreen(
+            initTitre = vm.home.titre,
+            initTexte = vm.home.texte,
+            onDismiss = { editing = false },
+            onSave = { t, x ->
+                editing = false
+                vm.saveHome(t, x)
+            }
+        )
+    }
+}
+
+@Composable
+fun EditHomeScreen(
+    initTitre: String,
+    initTexte: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String) -> Unit
+) {
+    var titre by remember { mutableStateOf(initTitre) }
+    var texte by remember { mutableStateOf(initTexte) }
+    var err by remember { mutableStateOf<String?>(null) }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Paper) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().background(Marine).padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("← Annuler", color = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        "Modifier l'accueil", color = PaleBlue, fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 12.dp)
+                    )
+                }
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    OutlinedTextField(
+                        value = titre,
+                        onValueChange = { titre = it },
+                        label = { Text("Grand titre") },
+                        supportingText = { Text("Entourez des mots avec des étoiles pour les mettre en couleur : *votre santé*") },
+                        minLines = 2,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = texte,
+                        onValueChange = { texte = it },
+                        label = { Text("Texte sous le grand titre") },
+                        minLines = 6,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Text("Aperçu", fontWeight = FontWeight.SemiBold, color = Slate)
+                    Card(colors = CardDefaults.cardColors(containerColor = Marine), modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text(
+                                styledTitle(titre),
+                                color = Color.White, fontSize = 24.sp, lineHeight = 30.sp,
+                                fontFamily = FontFamily.Serif, fontWeight = FontWeight.SemiBold
+                            )
+                            Text(texte, color = PaleBlue, fontSize = 14.sp, lineHeight = 21.sp)
+                        }
+                    }
+                    val e = err
+                    if (e != null) Text(e, color = Color(0xFFB3261E), fontSize = 13.sp)
+                }
+                Surface(shadowElevation = 8.dp, color = Color.White) {
+                    Button(
+                        onClick = {
+                            if (titre.isBlank() || texte.isBlank()) {
+                                err = "Le titre et le texte ne peuvent pas être vides."
+                            } else if (titre.trim() == initTitre.trim() && texte.trim() == initTexte.trim()) {
+                                onDismiss()
+                            } else {
+                                onSave(titre, texte)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(12.dp).height(52.dp)
+                    ) { Text("Valider et mettre à jour le site") }
+                }
+            }
+        }
     }
 }
 
@@ -437,6 +528,7 @@ fun HomeTab(vm: AdminViewModel) {
 fun ProductsTab(vm: AdminViewModel) {
     var showAdd by remember { mutableStateOf(false) }
     var deleteIndex by remember { mutableIntStateOf(-1) }
+    var editIndex by remember { mutableIntStateOf(-1) }
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -465,7 +557,7 @@ fun ProductsTab(vm: AdminViewModel) {
         }
         itemsIndexed(vm.products) { i, p ->
             val sub = listOf(p.categorie, p.prix).filter { it.isNotBlank() }.joinToString(" · ")
-            ItemCard(vm, p.image, p.nom, sub, p.description) { deleteIndex = i }
+            ItemCard(vm, p.image, p.nom, sub, p.description, onEdit = { editIndex = i }, onDelete = { deleteIndex = i })
         }
     }
 
@@ -479,6 +571,27 @@ fun ProductsTab(vm: AdminViewModel) {
             onSave = { name, tag, price, desc, img ->
                 vm.addProduct(name, tag, price, desc, img)
                 showAdd = false
+            }
+        )
+    }
+    if (editIndex >= 0 && editIndex < vm.products.size) {
+        val cur = vm.products[editIndex]
+        val idx = editIndex
+        EditItemScreen(
+            vm = vm,
+            heading = "Modifier le produit",
+            nameLabel = "Nom du produit",
+            tagLabel = "Catégorie (facultatif)",
+            priceLabel = "Prix (facultatif)",
+            initName = cur.nom,
+            initTag = cur.categorie,
+            initPrice = cur.prix,
+            initDesc = cur.description,
+            currentImage = cur.image,
+            onDismiss = { editIndex = -1 },
+            onSave = { name, tag, price, desc, img ->
+                editIndex = -1
+                vm.editProduct(idx, name, tag, price, desc, img)
             }
         )
     }
@@ -499,6 +612,7 @@ fun ProductsTab(vm: AdminViewModel) {
 fun ServicesTab(vm: AdminViewModel) {
     var showAdd by remember { mutableStateOf(false) }
     var deleteIndex by remember { mutableIntStateOf(-1) }
+    var editIndex by remember { mutableIntStateOf(-1) }
 
     LazyColumn(
         Modifier.fillMaxSize(),
@@ -522,7 +636,7 @@ fun ServicesTab(vm: AdminViewModel) {
             item { Text("Aucun service publié.", color = Slate) }
         }
         itemsIndexed(vm.services) { i, s ->
-            ItemCard(vm, s.image, s.titre, s.domaine, s.description) { deleteIndex = i }
+            ItemCard(vm, s.image, s.titre, s.domaine, s.description, onEdit = { editIndex = i }, onDelete = { deleteIndex = i })
         }
     }
 
@@ -536,6 +650,27 @@ fun ServicesTab(vm: AdminViewModel) {
             onSave = { name, tag, _, desc, img ->
                 vm.addService(name, tag, desc, img)
                 showAdd = false
+            }
+        )
+    }
+    if (editIndex >= 0 && editIndex < vm.services.size) {
+        val cur = vm.services[editIndex]
+        val idx = editIndex
+        EditItemScreen(
+            vm = vm,
+            heading = "Modifier le service",
+            nameLabel = "Titre du service",
+            tagLabel = "Domaine (facultatif, ex : Finance)",
+            priceLabel = null,
+            initName = cur.titre,
+            initTag = cur.domaine,
+            initPrice = "",
+            initDesc = cur.description,
+            currentImage = cur.image,
+            onDismiss = { editIndex = -1 },
+            onSave = { name, tag, _, desc, img ->
+                editIndex = -1
+                vm.editService(idx, name, tag, desc, img)
             }
         )
     }
@@ -871,6 +1006,7 @@ fun ItemCard(
     title: String,
     subtitle: String,
     description: String,
+    onEdit: () -> Unit,
     onDelete: () -> Unit
 ) {
     Card(
@@ -894,8 +1030,164 @@ fun ItemCard(
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            IconButton(onClick = onDelete) {
-                Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Bordeaux)
+            Column {
+                IconButton(onClick = onEdit) {
+                    Icon(Icons.Default.Edit, contentDescription = "Modifier", tint = Marine)
+                }
+                IconButton(onClick = onDelete) {
+                    Icon(Icons.Default.Delete, contentDescription = "Supprimer", tint = Bordeaux)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun EditItemScreen(
+    vm: AdminViewModel,
+    heading: String,
+    nameLabel: String,
+    tagLabel: String,
+    priceLabel: String?,
+    initName: String,
+    initTag: String,
+    initPrice: String,
+    initDesc: String,
+    currentImage: String,
+    onDismiss: () -> Unit,
+    onSave: (String, String, String, String, ByteArray?) -> Unit
+) {
+    var name by remember { mutableStateOf(initName) }
+    var tag by remember { mutableStateOf(initTag) }
+    var price by remember { mutableStateOf(initPrice) }
+    var desc by remember { mutableStateOf(initDesc) }
+    var imageBytes by remember { mutableStateOf<ByteArray?>(null) }
+    var loadingImage by remember { mutableStateOf(false) }
+    var err by remember { mutableStateOf<String?>(null) }
+
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+        if (uri != null) {
+            loadingImage = true
+            err = null
+            scope.launch {
+                try {
+                    imageBytes = withContext(Dispatchers.IO) { ImageUtil.prepareJpeg(context, uri) }
+                } catch (e: Exception) {
+                    err = "Image illisible : " + (e.message ?: "")
+                }
+                loadingImage = false
+            }
+        }
+    }
+    val preview: ImageBitmap? = remember(imageBytes) {
+        val b = imageBytes
+        if (b == null) null else ImageUtil.decodeSampled(b, 600)?.asImageBitmap()
+    }
+
+    Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
+        Surface(modifier = Modifier.fillMaxSize(), color = Paper) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    Modifier.fillMaxWidth().background(Marine).padding(horizontal = 8.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    TextButton(onClick = onDismiss) { Text("← Annuler", color = Color.White) }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        heading, color = PaleBlue, fontSize = 14.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 12.dp)
+                    )
+                }
+
+                Column(
+                    Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text("Photo", fontWeight = FontWeight.SemiBold, color = Slate)
+                    if (preview != null) {
+                        Image(
+                            bitmap = preview,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxWidth().height(190.dp).clip(RoundedCornerShape(12.dp))
+                        )
+                    } else {
+                        Thumb(vm, currentImage, 150.dp)
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            picker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+                        },
+                        enabled = !loadingImage,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            when {
+                                loadingImage -> "Traitement de l'image…"
+                                imageBytes != null -> "Choisir une autre photo"
+                                currentImage.isNotBlank() -> "Changer la photo"
+                                else -> "Ajouter une photo"
+                            }
+                        )
+                    }
+
+                    OutlinedTextField(
+                        value = name,
+                        onValueChange = { name = it },
+                        label = { Text(nameLabel) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = tag,
+                        onValueChange = { tag = it },
+                        label = { Text(tagLabel) },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    if (priceLabel != null) {
+                        OutlinedTextField(
+                            value = price,
+                            onValueChange = { price = it },
+                            label = { Text(priceLabel) },
+                            singleLine = true,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                    }
+                    OutlinedTextField(
+                        value = desc,
+                        onValueChange = { desc = it },
+                        label = { Text("Petite description") },
+                        minLines = 5,
+                        keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    val e = err
+                    if (e != null) Text(e, color = Color(0xFFB3261E), fontSize = 13.sp)
+                }
+
+                Surface(shadowElevation = 8.dp, color = Color.White) {
+                    Button(
+                        enabled = !loadingImage,
+                        onClick = {
+                            if (name.isBlank()) {
+                                err = "Le titre / nom est obligatoire."
+                            } else if (imageBytes == null &&
+                                name.trim() == initName.trim() && tag.trim() == initTag.trim() &&
+                                price.trim() == initPrice.trim() && desc.trim() == initDesc.trim()
+                            ) {
+                                onDismiss() // rien n'a changé
+                            } else {
+                                onSave(name, tag, price, desc, imageBytes)
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth().padding(12.dp).height(52.dp)
+                    ) { Text("Valider et mettre à jour le site") }
+                }
             }
         }
     }
